@@ -14,11 +14,9 @@
     @keyframes priceUp { 0% { transform: scale(1.25); color: #22c55e; } }
     .price-down { animation: priceDown 0.6s; }
     @keyframes priceDown { 0% { transform: scale(0.75); color: #ef4444; } }
-    .news-modal { animation: newsPop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1); }
-    @keyframes newsPop { from { transform: scale(0.7) translateY(40px); opacity: 0; } }
     .modal { animation: modalPop 0.4s ease-out; }
     @keyframes modalPop { from { opacity: 0; transform: scale(0.8); } }
-    #worthChart { max-height: 160px; } /* 固定高度，防止拉伸 */
+    #worthChart { max-height: 160px; }
   </style>
 </head>
 <body class="bg-slate-950 text-white min-h-screen">
@@ -34,10 +32,14 @@
       mental: 85,
       portfolio: { btc: 0, btcAvg: 0, eth: 0, ethAvg: 0, alt: 0, altAvg: 0, meme: [] },
       history: [],
-      worthHistory: [1000]
+      worthHistory: [1000],
+      celebrated10k: false,
+      celebrated50k: false,
+      celebrated100k: false
     };
 
-    let market = { btc: 65200, eth: 3280, alt: 420,
+    let market = {
+      btc: 65200, eth: 3280, alt: 420,
       memes: [
         { name: "$PEPE", price: 0.000012 },
         { name: "$GROK", price: 0.000009 },
@@ -55,15 +57,20 @@
     ];
 
     const actions = [
-      { id:1, name:"🟡 买 BTC 现货", desc:"稳健", type:"buy", coin:"btc", amount:200 },
-      { id:2, name:"🔵 买 ETH 现货", desc:"布局", type:"buy", coin:"eth", amount:150 },
-      { id:3, name:"🟣 买山寨币", desc:"高波动", type:"buy", coin:"alt", amount:180 },
+      { id:1, name:"🟡 买 BTC 现货", desc:"稳健", type:"buy", coin:"btc" },
+      { id:2, name:"🔵 买 ETH 现货", desc:"布局", type:"buy", coin:"eth" },
+      { id:3, name:"🟣 买山寨币", desc:"高波动", type:"buy", coin:"alt" },
       { id:4, name:"🔥 梭哈 Meme", desc:"全仓赌命", type:"meme" },
       { id:5, name:"📈 开 10x 合约", desc:"立即结算", type:"contract" },
-      { id:6, name:"😌 冷静休息", desc:"恢复心态", type:"rest" }
+      { id:6, name:"😌 冷静休息", desc:"恢复心态", type:"rest" },
+      { id:7, name:"🏆 功成身退", desc:"结束游戏", type:"retire" }
     ];
 
-    let currentChart = null;   // 关键：保存 chart 实例用于销毁
+    let currentChart = null;
+
+    function formatMoney(amount) {
+      return '$' + Number(amount).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
 
     function getSellActions() {
       let sells = [];
@@ -90,7 +97,7 @@
         const curr = market.memes.find(x => x.name === m.name)?.price || m.avg;
         total += m.amount * curr;
       });
-      player.netWorth = Math.max(0, Math.round(total));
+      player.netWorth = Math.max(0, Math.round(total * 100) / 100);
       return player.netWorth;
     }
 
@@ -117,7 +124,7 @@
           <div class="text-6xl mb-4">${emoji}</div>
           <h2 class="text-2xl font-bold mb-3">${title}</h2>
           <p class="text-slate-300 mb-6">${desc}</p>
-          <button onclick="closeModal()" class="w-full bg-white text-slate-900 py-4 rounded-2xl font-bold">继续梭哈</button>
+          <button onclick="closeModal()" class="w-full bg-white text-slate-900 py-4 rounded-2xl font-bold">继续</button>
         </div>
       `;
       overlay.classList.remove('hidden');
@@ -129,23 +136,36 @@
 
     function celebrate(milestone) {
       let msg = "";
-      if (milestone === 10000) msg = "🎊 恭喜！净值突破 1 万美元！你已经不是纯小白了！";
+      if (milestone === 10000) msg = "🎊 净值突破 1 万美元！你已经不是纯小白了！";
       else if (milestone === 50000) msg = "🔥 牛逼！净值达到 5 万美元！散户中的战斗机！";
       else if (milestone === 100000) msg = "🌟 传奇诞生！净值突破 10 万美元！你就是 Web3 炼金之神！";
       showModal("里程碑达成", msg, "🏆");
     }
 
+    function promptAmount(defaultAmount, title) {
+      let amount = prompt(title || "请输入金额 (USDT):", defaultAmount);
+      amount = parseFloat(amount);
+      return isNaN(amount) || amount <= 0 ? null : Math.min(amount, player.cash);
+    }
+
     function doAction(id) {
-      const act = actions.find(a => a.id === id) || getSellActions().find(a => a.id === id);
+      let act = actions.find(a => a.id === id) || getSellActions().find(a => a.id === id);
       if (!act) return;
 
       let resultText = "";
+      let amount = 0;
 
-      // ...（买、卖、梭哈、合约、休息逻辑保持不变，与上一版完全一致）...
+      if (act.type === "buy" || act.type === "contract" || act.type === "meme") {
+        if (act.type === "meme") amount = promptAmount(player.cash, "梭哈金额 (最多全部现金):");
+        else if (act.type === "contract") amount = promptAmount(100, "开合约保证金 (最低100):");
+        else amount = promptAmount(act.coin === "btc" ? 200 : act.coin === "eth" ? 150 : 180, "买入金额 (USDT):");
+
+        if (!amount || amount > player.cash) return alert("金额无效或现金不足！");
+      }
+
       if (act.type === "buy") {
-        if (player.cash < act.amount) return alert("现金不足！");
         const price = act.coin === "btc" ? market.btc : act.coin === "eth" ? market.eth : market.alt;
-        const qty = act.amount / price;
+        const qty = amount / price;
         if (act.coin === "btc") {
           const oldQty = player.portfolio.btc;
           player.portfolio.btc += qty;
@@ -159,23 +179,20 @@
           player.portfolio.alt += qty;
           player.portfolio.altAvg = (player.portfolio.altAvg * oldQty + price * qty) / player.portfolio.alt;
         }
-        player.cash -= act.amount;
-        resultText = `买入 ${act.name} $${act.amount}`;
+        player.cash -= amount;
+        resultText = `买入 ${act.name.replace("买","")} $${amount.toFixed(2)}`;
       }
       else if (act.type === "meme") {
-        if (player.cash < 50) return alert("钱不够！");
         const meme = market.memes[Math.floor(Math.random() * market.memes.length)];
-        const allIn = player.cash;
-        player.portfolio.meme.push({name: meme.name, amount: allIn / meme.price, avg: meme.price});
-        player.cash = 0;
-        resultText = `梭哈 ${meme.name} 全仓 $${allIn}`;
+        player.portfolio.meme.push({name: meme.name, amount: amount / meme.price, avg: meme.price});
+        player.cash -= amount;
+        resultText = `梭哈 ${meme.name} $${amount.toFixed(2)}`;
       }
       else if (act.type === "contract") {
-        if (player.cash < 100) return alert("保证金不足！");
         const win = Math.random() > 0.48;
-        const pnl = win ? Math.random() * 1800 + 300 : -Math.random() * 950 - 100;
-        player.cash += pnl + 100;
-        resultText = win ? `📈 10x 合约大赚 +$${Math.round(pnl)}` : `📉 10x 合约亏损 $${Math.round(pnl)}`;
+        const pnl = win ? (Math.random() * 15 + 3) * amount : -(Math.random() * 9 + 1) * amount;
+        player.cash += pnl + amount;   // 返还保证金 + 盈亏
+        resultText = win ? `📈 10x 合约大赚 +$${pnl.toFixed(2)}` : `📉 10x 合约亏损 $${pnl.toFixed(2)}`;
       }
       else if (act.type === "rest") {
         player.mental = Math.min(100, player.mental + 35);
@@ -186,7 +203,7 @@
         if (act.coin === "btc" && player.portfolio.btc > 0) { value = player.portfolio.btc * market.btc; player.cash += value; player.portfolio.btc = 0; }
         else if (act.coin === "eth" && player.portfolio.eth > 0) { value = player.portfolio.eth * market.eth; player.cash += value; player.portfolio.eth = 0; }
         else if (act.coin === "alt" && player.portfolio.alt > 0) { value = player.portfolio.alt * market.alt; player.cash += value; player.portfolio.alt = 0; }
-        resultText = `卖出全部 ${act.coin.toUpperCase()} 获利 $${Math.round(value)}`;
+        resultText = `卖出全部 ${act.coin.toUpperCase()} 获利 $${value.toFixed(2)}`;
       }
       else if (act.type === "sellMeme") {
         let totalValue = 0;
@@ -196,7 +213,11 @@
         });
         player.cash += totalValue;
         player.portfolio.meme = [];
-        resultText = `全部卖出 Meme 获利 $${Math.round(totalValue)}`;
+        resultText = `全部卖出 Meme 获利 $${totalValue.toFixed(2)}`;
+      }
+      else if (act.type === "retire") {
+        showRetireScreen();
+        return;
       }
 
       player.mental = Math.max(15, player.mental - 10);
@@ -209,11 +230,8 @@
 
         const nw = calculateNetWorth();
         player.worthHistory.push(nw);
-
-        // 限制只保留最近12天数据（修复图表无限变长）
         if (player.worthHistory.length > 12) player.worthHistory.shift();
 
-        // 里程碑
         if (nw >= 100000 && !player.celebrated100k) { celebrate(100000); player.celebrated100k = true; }
         else if (nw >= 50000 && !player.celebrated50k) { celebrate(50000); player.celebrated50k = true; }
         else if (nw >= 10000 && !player.celebrated10k) { celebrate(10000); player.celebrated10k = true; }
@@ -222,6 +240,24 @@
 
         render();
       }, 300);
+    }
+
+    function showRetireScreen() {
+      const nw = calculateNetWorth();
+      let msg = `你选择了功成身退！<br>最终净值：${formatMoney(nw)}`;
+      if (nw >= 100000) msg += "<br><br>🌟 你是真正的 Web3 传奇！";
+      else if (nw >= 50000) msg += "<br><br>🔥 非常成功的散户！";
+      else if (nw >= 10000) msg += "<br><br>🎉 已经实现财务自由小目标！";
+
+      const app = document.getElementById('app');
+      app.innerHTML = `
+        <div class="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-emerald-950 to-black p-8 text-center">
+          <div class="text-7xl mb-6">🏆</div>
+          <h1 class="text-5xl font-bold mb-6 text-emerald-400">功成身退</h1>
+          <div class="text-2xl mb-8 leading-relaxed">${msg}</div>
+          <button onclick="resetGame()" class="bg-white hover:bg-emerald-400 text-slate-900 px-16 py-6 rounded-3xl text-2xl font-bold transition">重新开始新人生</button>
+        </div>
+      `;
     }
 
     function showGameOver() {
@@ -248,16 +284,13 @@
       const nw = calculateNetWorth();
       const sellActions = getSellActions();
 
-      // 销毁旧图表（关键修复）
-      if (currentChart) {
-        currentChart.destroy();
-        currentChart = null;
-      }
+      if (currentChart) { currentChart.destroy(); currentChart = null; }
 
       let memeHTML = player.portfolio.meme.map(m => {
         const curr = market.memes.find(x => x.name === m.name)?.price || m.avg;
         const pnl = ((curr / m.avg - 1) * 100).toFixed(1);
-        return `<div class="flex justify-between py-1"><span>${m.name}</span><span class="${pnl>0 ? 'text-green-400' : 'text-red-400'}">${pnl}%</span></div>`;
+        const value = (m.amount * curr).toFixed(2);
+        return `<div class="flex justify-between py-1 text-sm"><span>${m.name}</span><span>$${value}</span><span class="${pnl>0 ? 'text-green-400' : 'text-red-400'}">${pnl}%</span></div>`;
       }).join('');
 
       const chartLabels = player.worthHistory.map((_, i) => `D${player.age - player.worthHistory.length + 1 + i}`);
@@ -272,13 +305,19 @@
             </div>
             <div class="text-right">
               <div class="text-xs text-slate-400">第 ${player.age} 天</div>
-              <div class="text-4xl font-bold ${nw >= 1000 ? 'text-green-400 price-up' : 'text-red-400 price-down'}">$${nw}</div>
+              <div class="text-4xl font-bold ${nw >= 1000 ? 'text-green-400 price-up' : 'text-red-400 price-down'}">${formatMoney(nw)}</div>
             </div>
           </div>
 
           <div class="grid grid-cols-2 gap-4 mb-6">
-            <div class="bg-slate-800 rounded-3xl p-5"><div class="text-xs text-slate-400">现金</div><div class="text-3xl font-bold">$${player.cash}</div></div>
-            <div class="bg-slate-800 rounded-3xl p-5"><div class="text-xs text-slate-400">心态</div><div class="text-3xl font-bold">${player.mental} ❤️</div></div>
+            <div class="bg-slate-800 rounded-3xl p-5">
+              <div class="text-xs text-slate-400">现金</div>
+              <div class="text-3xl font-bold">${formatMoney(player.cash)}</div>
+            </div>
+            <div class="bg-slate-800 rounded-3xl p-5">
+              <div class="text-xs text-slate-400">心态</div>
+              <div class="text-3xl font-bold">${player.mental} ❤️</div>
+            </div>
           </div>
 
           <div class="bg-slate-800 rounded-3xl p-5 mb-6">
@@ -289,15 +328,12 @@
           </div>
 
           <div class="bg-slate-800 rounded-3xl p-5 mb-6">
-            <div class="text-sm font-medium mb-3 flex justify-between">
-              <span>我的持仓</span>
-              <span class="text-xs text-slate-400">点击下方卖出</span>
-            </div>
-            ${player.portfolio.btc > 0 ? `<div class="flex justify-between py-1 text-sm"><span>BTC ×${player.portfolio.btc.toFixed(4)}</span><span>$${Math.round(player.portfolio.btc * market.btc)}</span></div>` : ''}
-            ${player.portfolio.eth > 0 ? `<div class="flex justify-between py-1 text-sm"><span>ETH ×${player.portfolio.eth.toFixed(3)}</span><span>$${Math.round(player.portfolio.eth * market.eth)}</span></div>` : ''}
-            ${player.portfolio.alt > 0 ? `<div class="flex justify-between py-1 text-sm"><span>山寨 ×${player.portfolio.alt.toFixed(2)}</span><span>$${Math.round(player.portfolio.alt * market.alt)}</span></div>` : ''}
+            <div class="text-sm font-medium mb-3">我的持仓（市值）</div>
+            ${player.portfolio.btc > 0 ? `<div class="flex justify-between py-1 text-sm"><span>BTC ×${player.portfolio.btc.toFixed(4)}</span><span>$${ (player.portfolio.btc * market.btc).toFixed(2) }</span></div>` : ''}
+            ${player.portfolio.eth > 0 ? `<div class="flex justify-between py-1 text-sm"><span>ETH ×${player.portfolio.eth.toFixed(3)}</span><span>$${ (player.portfolio.eth * market.eth).toFixed(2) }</span></div>` : ''}
+            ${player.portfolio.alt > 0 ? `<div class="flex justify-between py-1 text-sm"><span>山寨 ×${player.portfolio.alt.toFixed(2)}</span><span>$${ (player.portfolio.alt * market.alt).toFixed(2) }</span></div>` : ''}
             ${memeHTML ? `<div class="mt-3 pt-3 border-t border-slate-700">${memeHTML}</div>` : ''}
-            ${!player.portfolio.btc && !player.portfolio.eth && !player.portfolio.alt && !player.portfolio.meme.length ? `<div class="text-center py-6 text-slate-500">空仓 • 快去买币！</div>` : ''}
+            ${!player.portfolio.btc && !player.portfolio.eth && !player.portfolio.alt && !player.portfolio.meme.length ? `<div class="text-center py-6 text-slate-500">空仓 • 快去操作！</div>` : ''}
           </div>
 
           <div class="mb-6">
@@ -334,31 +370,17 @@
 
       app.innerHTML = html;
 
-      // 创建新图表
       setTimeout(() => {
         const ctx = document.getElementById('worthChart');
         if (ctx) {
           currentChart = new Chart(ctx, {
             type: 'line',
-            data: {
-              labels: chartLabels,
-              datasets: [{
-                label: '净值 $',
-                data: chartData,
-                borderColor: '#22c55e',
-                tension: 0.3,
-                borderWidth: 3,
-                pointRadius: 2
-              }]
-            },
+            data: { labels: chartLabels, datasets: [{ label: '净值', data: chartData, borderColor: '#22c55e', tension: 0.3, borderWidth: 3, pointRadius: 2 }] },
             options: {
               responsive: true,
               maintainAspectRatio: false,
               plugins: { legend: { display: false } },
-              scales: {
-                y: { grid: { color: '#334155' }, ticks: { color: '#64748b' } },
-                x: { grid: { color: '#334155' }, ticks: { color: '#64748b', maxTicksLimit: 6 } }
-              }
+              scales: { y: { grid: { color: '#334155' }, ticks: { color: '#64748b' } }, x: { grid: { color: '#334155' }, ticks: { color: '#64748b', maxTicksLimit: 6 } } }
             }
           });
         }

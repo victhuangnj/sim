@@ -18,11 +18,11 @@
     @keyframes newsPop { from { transform: scale(0.7) translateY(40px); opacity: 0; } }
     .modal { animation: modalPop 0.4s ease-out; }
     @keyframes modalPop { from { opacity: 0; transform: scale(0.8); } }
+    #worthChart { max-height: 160px; } /* 固定高度，防止拉伸 */
   </style>
 </head>
 <body class="bg-slate-950 text-white min-h-screen">
   <div class="max-w-2xl mx-auto bg-slate-900 min-h-screen shadow-2xl overflow-hidden" id="app"></div>
-
   <div id="modalOverlay" class="hidden fixed inset-0 bg-black/80 flex items-center justify-center z-50"></div>
 
   <script>
@@ -34,11 +34,10 @@
       mental: 85,
       portfolio: { btc: 0, btcAvg: 0, eth: 0, ethAvg: 0, alt: 0, altAvg: 0, meme: [] },
       history: [],
-      worthHistory: [1000]   // 用于绘制净值曲线
+      worthHistory: [1000]
     };
 
-    let market = {
-      btc: 65200, eth: 3280, alt: 420,
+    let market = { btc: 65200, eth: 3280, alt: 420,
       memes: [
         { name: "$PEPE", price: 0.000012 },
         { name: "$GROK", price: 0.000009 },
@@ -64,7 +63,8 @@
       { id:6, name:"😌 冷静休息", desc:"恢复心态", type:"rest" }
     ];
 
-    // 卖出选项
+    let currentChart = null;   // 关键：保存 chart 实例用于销毁
+
     function getSellActions() {
       let sells = [];
       if (player.portfolio.btc > 0) sells.push({id:10, name:"🟡 卖出 BTC", type:"sell", coin:"btc"});
@@ -141,6 +141,7 @@
 
       let resultText = "";
 
+      // ...（买、卖、梭哈、合约、休息逻辑保持不变，与上一版完全一致）...
       if (act.type === "buy") {
         if (player.cash < act.amount) return alert("现金不足！");
         const price = act.coin === "btc" ? market.btc : act.coin === "eth" ? market.eth : market.alt;
@@ -182,19 +183,9 @@
       }
       else if (act.type === "sell") {
         let value = 0;
-        if (act.coin === "btc" && player.portfolio.btc > 0) {
-          value = player.portfolio.btc * market.btc;
-          player.cash += value;
-          player.portfolio.btc = 0;
-        } else if (act.coin === "eth" && player.portfolio.eth > 0) {
-          value = player.portfolio.eth * market.eth;
-          player.cash += value;
-          player.portfolio.eth = 0;
-        } else if (act.coin === "alt" && player.portfolio.alt > 0) {
-          value = player.portfolio.alt * market.alt;
-          player.cash += value;
-          player.portfolio.alt = 0;
-        }
+        if (act.coin === "btc" && player.portfolio.btc > 0) { value = player.portfolio.btc * market.btc; player.cash += value; player.portfolio.btc = 0; }
+        else if (act.coin === "eth" && player.portfolio.eth > 0) { value = player.portfolio.eth * market.eth; player.cash += value; player.portfolio.eth = 0; }
+        else if (act.coin === "alt" && player.portfolio.alt > 0) { value = player.portfolio.alt * market.alt; player.cash += value; player.portfolio.alt = 0; }
         resultText = `卖出全部 ${act.coin.toUpperCase()} 获利 $${Math.round(value)}`;
       }
       else if (act.type === "sellMeme") {
@@ -219,15 +210,15 @@
         const nw = calculateNetWorth();
         player.worthHistory.push(nw);
 
-        // 里程碑庆祝
+        // 限制只保留最近12天数据（修复图表无限变长）
+        if (player.worthHistory.length > 12) player.worthHistory.shift();
+
+        // 里程碑
         if (nw >= 100000 && !player.celebrated100k) { celebrate(100000); player.celebrated100k = true; }
         else if (nw >= 50000 && !player.celebrated50k) { celebrate(50000); player.celebrated50k = true; }
         else if (nw >= 10000 && !player.celebrated10k) { celebrate(10000); player.celebrated10k = true; }
 
-        if (nw <= 0) {
-          showGameOver();
-          return;
-        }
+        if (nw <= 0) { showGameOver(); return; }
 
         render();
       }, 300);
@@ -257,15 +248,20 @@
       const nw = calculateNetWorth();
       const sellActions = getSellActions();
 
+      // 销毁旧图表（关键修复）
+      if (currentChart) {
+        currentChart.destroy();
+        currentChart = null;
+      }
+
       let memeHTML = player.portfolio.meme.map(m => {
         const curr = market.memes.find(x => x.name === m.name)?.price || m.avg;
         const pnl = ((curr / m.avg - 1) * 100).toFixed(1);
         return `<div class="flex justify-between py-1"><span>${m.name}</span><span class="${pnl>0 ? 'text-green-400' : 'text-red-400'}">${pnl}%</span></div>`;
       }).join('');
 
-      // 简单折线图数据（最近10天）
-      const chartLabels = player.worthHistory.slice(-10).map((_, i) => `Day ${player.age - player.worthHistory.length + 10 + i}`);
-      const chartData = player.worthHistory.slice(-10);
+      const chartLabels = player.worthHistory.map((_, i) => `D${player.age - player.worthHistory.length + 1 + i}`);
+      const chartData = player.worthHistory;
 
       let html = `
         <div class="p-6 bg-gradient-to-br from-slate-900 to-black">
@@ -280,25 +276,18 @@
             </div>
           </div>
 
-          <!-- 数据看板 -->
           <div class="grid grid-cols-2 gap-4 mb-6">
-            <div class="bg-slate-800 rounded-3xl p-5">
-              <div class="text-xs text-slate-400">现金</div>
-              <div class="text-3xl font-bold">$${player.cash}</div>
-            </div>
-            <div class="bg-slate-800 rounded-3xl p-5">
-              <div class="text-xs text-slate-400">心态</div>
-              <div class="text-3xl font-bold">${player.mental} ❤️</div>
-            </div>
+            <div class="bg-slate-800 rounded-3xl p-5"><div class="text-xs text-slate-400">现金</div><div class="text-3xl font-bold">$${player.cash}</div></div>
+            <div class="bg-slate-800 rounded-3xl p-5"><div class="text-xs text-slate-400">心态</div><div class="text-3xl font-bold">${player.mental} ❤️</div></div>
           </div>
 
-          <!-- 净值曲线 -->
           <div class="bg-slate-800 rounded-3xl p-5 mb-6">
-            <div class="text-sm font-medium mb-3">净值走势</div>
-            <canvas id="worthChart" class="w-full h-40"></canvas>
+            <div class="text-sm font-medium mb-3">净值走势（最近12天）</div>
+            <div style="position:relative; height:160px;">
+              <canvas id="worthChart"></canvas>
+            </div>
           </div>
 
-          <!-- 持仓 -->
           <div class="bg-slate-800 rounded-3xl p-5 mb-6">
             <div class="text-sm font-medium mb-3 flex justify-between">
               <span>我的持仓</span>
@@ -311,7 +300,6 @@
             ${!player.portfolio.btc && !player.portfolio.eth && !player.portfolio.alt && !player.portfolio.meme.length ? `<div class="text-center py-6 text-slate-500">空仓 • 快去买币！</div>` : ''}
           </div>
 
-          <!-- 操作区（横向布局优化） -->
           <div class="mb-6">
             <div class="text-lg font-semibold mb-4">🚀 操作区</div>
             <div class="grid grid-cols-2 gap-3">
@@ -330,7 +318,6 @@
             </div>
           </div>
 
-          <!-- 历史记录（更紧凑） -->
           <div class="px-2">
             <div class="text-lg font-semibold mb-3">📜 最近记录</div>
             <div class="max-h-52 overflow-y-auto space-y-2 text-sm">
@@ -347,11 +334,11 @@
 
       app.innerHTML = html;
 
-      // 绘制净值曲线
+      // 创建新图表
       setTimeout(() => {
         const ctx = document.getElementById('worthChart');
         if (ctx) {
-          new Chart(ctx, {
+          currentChart = new Chart(ctx, {
             type: 'line',
             data: {
               labels: chartLabels,
@@ -361,7 +348,7 @@
                 borderColor: '#22c55e',
                 tension: 0.3,
                 borderWidth: 3,
-                pointRadius: 0
+                pointRadius: 2
               }]
             },
             options: {
@@ -370,7 +357,7 @@
               plugins: { legend: { display: false } },
               scales: {
                 y: { grid: { color: '#334155' }, ticks: { color: '#64748b' } },
-                x: { grid: { color: '#334155' }, ticks: { color: '#64748b', maxTicksLimit: 5 } }
+                x: { grid: { color: '#334155' }, ticks: { color: '#64748b', maxTicksLimit: 6 } }
               }
             }
           });

@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Web3 散户模拟器 - 1000刀炼金之路</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { font-family: "Microsoft YaHei", system-ui, sans-serif; }
+    .card { transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+    .card:hover { transform: translateY(-4px); box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.1); }
+    .green { color: #22c55e; }
+    .red { color: #ef4444; }
+    .header { background: linear-gradient(90deg, #1e2937, #0f172a); }
+  </style>
+</head>
+<body class="bg-slate-950 text-white min-h-screen">
+  <div class="max-w-md mx-auto bg-slate-900 min-h-screen shadow-2xl overflow-hidden" id="app">
+
+    <!-- 页面内容由 JS 动态渲染 -->
+
+  </div>
+
+  <script>
+    // ====================== 游戏数据 ======================
+    let player = {
+      name: "炼金叔叔",
+      cash: 1000,                    // USDT
+      age: 1,                        // 第几天（模拟）
+      netWorth: 1000,
+      mental: 80,                    // 心态值（太低会强制冷静）
+      portfolio: {
+        btc: 0,                      // BTC 持仓数量
+        btcAvgPrice: 0,              // 平均成本
+        eth: 0,
+        ethAvgPrice: 0,
+        meme: []                     // {name, amount, avgPrice}
+      },
+      leverage: null,                // {side: 'long'|'short', leverage: 10, size: 100, entryPrice: 65000}
+      history: []                    // 交易记录
+    };
+
+    // 当前市场价格（每天随机波动）
+    let market = {
+      btcPrice: 65000,
+      ethPrice: 3200,
+      memes: [
+        { name: "$PEPE", price: 0.000012, change: 0 },
+        { name: "$GROK", price: 0.000008, change: 0 },
+        { name: "$DOGE", price: 0.18, change: 0 },
+        { name: "$TRUMP", price: 12.5, change: 0 },
+        { name: "$MOON", price: 0.00045, change: 0 }
+      ]
+    };
+
+    // 行动列表
+    const actions = [
+      {
+        id: 1,
+        name: "🟡 买 BTC 现货",
+        desc: "稳健持有比特币",
+        cost: 200,
+        execute: () => {
+          const amount = 200 / market.btcPrice;
+          player.portfolio.btc += amount;
+          player.portfolio.btcAvgPrice = (player.portfolio.btcAvgPrice * (player.portfolio.btc - amount) + market.btcPrice * amount) / player.portfolio.btc;
+          player.cash -= 200;
+          addHistory("买入 BTC $" + 200);
+        }
+      },
+      {
+        id: 2,
+        name: "🔥 梭哈一个 Meme",
+        desc: "全仓赌一个随机 meme（高风险）",
+        execute: () => {
+          if (player.cash < 50) return alert("钱不够梭哈！");
+          const meme = market.memes[Math.floor(Math.random() * market.memes.length)];
+          const allIn = player.cash;
+          player.cash = 0;
+          const amount = allIn / meme.price;
+          player.portfolio.meme.push({ name: meme.name, amount: amount, avgPrice: meme.price });
+          addHistory("梭哈 " + meme.name + " $" + allIn.toFixed(0));
+        }
+      },
+      {
+        id: 3,
+        name: "📈 开合约（10x）",
+        desc: "开 10x BTC 永续合约",
+        execute: () => {
+          if (player.cash < 100) return alert("保证金不够！");
+          const side = Math.random() > 0.5 ? 'long' : 'short';
+          player.leverage = {
+            side: side,
+            leverage: 10,
+            size: 1000,                    // 仓位价值
+            entryPrice: market.btcPrice
+          };
+          player.cash -= 100;              // 保证金
+          addHistory(side === 'long' ? "开 10x 多单" : "开 10x 空单");
+        }
+      },
+      {
+        id: 4,
+        name: "💰 买 ETH 现货",
+        desc: "配置以太坊",
+        cost: 150,
+        execute: () => {
+          const amount = 150 / market.ethPrice;
+          player.portfolio.eth += amount;
+          player.portfolio.ethAvgPrice = (player.portfolio.ethAvgPrice * (player.portfolio.eth - amount) + market.ethPrice * amount) / player.portfolio.eth;
+          player.cash -= 150;
+          addHistory("买入 ETH $" + 150);
+        }
+      },
+      {
+        id: 5,
+        name: "🪂 参与空投挖矿",
+        desc: "花 gas 刷积分（可能空投）",
+        execute: () => {
+          player.cash -= 30;
+          if (Math.random() > 0.6) {
+            player.cash += 180;
+            addHistory("空投挖矿成功！+150 USDT");
+          } else {
+            addHistory("Gas 白交了…");
+          }
+        }
+      },
+      {
+        id: 6,
+        name: "📉 平掉合约",
+        desc: "结算当前杠杆仓位",
+        execute: () => {
+          if (!player.leverage) return alert("你没有开合约！");
+          const currentPrice = market.btcPrice;
+          const pnl = player.leverage.side === 'long' 
+            ? (currentPrice - player.leverage.entryPrice) / player.leverage.entryPrice * player.leverage.size * player.leverage.leverage
+            : (player.leverage.entryPrice - currentPrice) / player.leverage.entryPrice * player.leverage.size * player.leverage.leverage;
+          
+          player.cash += pnl + 100; // 返还保证金
+          addHistory(`平仓 ${player.leverage.side} 单，PNL $${pnl.toFixed(0)}`);
+          player.leverage = null;
+        }
+      },
+      {
+        id: 7,
+        name: "😌 冷静一晚",
+        desc: "恢复心态，不做任何操作",
+        execute: () => {
+          player.mental = Math.min(100, player.mental + 25);
+          addHistory("冷静一晚，心态回血");
+        }
+      }
+    ];
+
+    // ====================== 辅助函数 ======================
+    function updateMarket() {
+      // 随机波动
+      market.btcPrice *= (0.92 + Math.random() * 0.16);
+      market.ethPrice *= (0.92 + Math.random() * 0.16);
+      market.memes.forEach(m => {
+        const change = -0.4 + Math.random() * 0.9;
+        m.price *= (1 + change);
+        m.change = change * 100;
+      });
+
+      // 极端事件
+      if (Math.random() > 0.88) {
+        const event = Math.random() > 0.5 ? "Elon 发推" : "大户砸盘";
+        market.btcPrice *= event === "Elon 发推" ? 1.25 : 0.75;
+        alert(event + "！市场暴动！");
+      }
+    }
+
+    function calculateNetWorth() {
+      let total = player.cash;
+      
+      // BTC
+      total += player.portfolio.btc * market.btcPrice;
+      // ETH
+      total += player.portfolio.eth * market.ethPrice;
+      // Memes
+      player.portfolio.meme.forEach(m => {
+        total += m.amount * m.price || market.memes.find(x => x.name === m.name).price;
+      });
+      
+      // 杠杆未实现盈亏
+      if (player.leverage) {
+        const unrealized = player.leverage.side === 'long' 
+          ? (market.btcPrice - player.leverage.entryPrice) / player.leverage.entryPrice * player.leverage.size * player.leverage.leverage
+          : (player.leverage.entryPrice - market.btcPrice) / player.leverage.entryPrice * player.leverage.size * player.leverage.leverage;
+        total += unrealized;
+      }
+      
+      player.netWorth = Math.max(0, total);
+      return player.netWorth;
+    }
+
+    function addHistory(txt) {
+      player.history.unshift({
+        day: player.age,
+        text: txt
+      });
+      if (player.history.length > 8) player.history.pop();
+    }
+
+    function checkMental() {
+      if (player.mental < 30 && Math.random() > 0.6) {
+        alert("💢 你心态崩了！强制冷静一天并损失 5% 资产");
+        player.cash *= 0.95;
+        player.mental = 50;
+      }
+    }
+
+    // ====================== 渲染 ======================
+    function render() {
+      const app = document.getElementById('app');
+      const nw = calculateNetWorth();
+      
+      let memeHTML = player.portfolio.meme.map(m => {
+        const currPrice = market.memes.find(x => x.name === m.name).price;
+        const pnl = ((currPrice - m.avgPrice) / m.avgPrice * 100).toFixed(0);
+        return `<div class="flex justify-between text-sm py-1 border-b border-slate-700"><span>${m.name} ×${m.amount.toFixed(0)}</span><span class="${pnl>0?'green':'red'}">${pnl}%</span></div>`;
+      }).join('');
+
+      let html = `
+        <div class="header p-6 text-center">
+          <h1 class="text-3xl font-bold mb-1">Web3 散户模拟器</h1>
+          <p class="text-slate-400">炼金叔叔 • 第 ${player.age} 天</p>
+          <div class="mt-4 flex justify-between items-end">
+            <div>
+              <div class="text-xs opacity-70">总净值</div>
+              <div class="text-4xl font-bold ${nw >= 1000 ? 'green' : 'red'}">$${nw.toFixed(0)}</div>
+            </div>
+            <div class="text-right">
+              <div class="text-xs opacity-70">现金</div>
+              <div class="text-3xl font-bold">$${player.cash.toFixed(0)}</div>
+            </div>
+          </div>
+          <div class="mt-2 text-xs flex justify-between">
+            <span>BTC $${market.btcPrice.toFixed(0)}</span>
+            <span>ETH $${market.ethPrice.toFixed(0)}</span>
+            <span class="flex items-center">心态 ${player.mental} ❤️</span>
+          </div>
+        </div>
+
+        <!-- 杠杆仓位 -->
+        ${player.leverage ? `
+        <div class="mx-4 -mt-3 bg-red-900/80 text-white p-4 rounded-3xl flex justify-between items-center">
+          <div>
+            <span class="font-bold">${player.leverage.side === 'long' ? '🟢 10x 多单' : '🔴 10x 空单'}</span>
+            <div class="text-xs">仓位 $${player.leverage.size}</div>
+          </div>
+          <button onclick="closeLeverage()" class="bg-white text-red-900 px-5 py-2 rounded-2xl text-sm font-bold">平仓</button>
+        </div>` : ''}
+
+        <!-- 资产明细 -->
+        <div class="px-6 mt-6">
+          <div class="text-lg font-semibold mb-3">📊 我的持仓</div>
+          ${player.portfolio.btc > 0 ? `
+          <div class="bg-slate-800 rounded-2xl p-4 mb-3">
+            <div class="flex justify-between"><span>BTC ×${player.portfolio.btc.toFixed(4)}</span><span class="green">现价 $${market.btcPrice.toFixed(0)}</span></div>
+          </div>` : ''}
+          ${player.portfolio.eth > 0 ? `
+          <div class="bg-slate-800 rounded-2xl p-4 mb-3">
+            <div class="flex justify-between"><span>ETH ×${player.portfolio.eth.toFixed(3)}</span><span class="green">现价 $${market.ethPrice.toFixed(0)}</span></div>
+          </div>` : ''}
+          ${player.portfolio.meme.length ? `<div class="mb-3">${memeHTML}</div>` : ''}
+          ${player.portfolio.btc === 0 && player.portfolio.eth === 0 && player.portfolio.meme.length === 0 && !player.leverage ? 
+            `<div class="text-center py-8 text-slate-500">还没有任何持仓… 快去操作吧！</div>` : ''}
+        </div>
+
+        <!-- 行动卡片 -->
+        <div class="px-6 mt-4">
+          <div class="text-lg font-semibold mb-3">🚀 今天要干嘛？</div>
+          <div class="grid grid-cols-2 gap-3">
+            ${actions.map(a => `
+              <div onclick="doAction(${a.id})" class="card bg-slate-800 hover:bg-slate-700 p-4 rounded-3xl cursor-pointer">
+                <div class="text-xl mb-1">${a.name}</div>
+                <div class="text-xs text-slate-400">${a.desc}</div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+
+        <!-- 历史 -->
+        <div class="px-6 mt-8 mb-8">
+          <div class="text-lg font-semibold mb-3">📜 操作记录</div>
+          <div class="space-y-2 text-sm max-h-48 overflow-y-auto">
+            ${player.history.map(h => `
+              <div class="flex justify-between bg-slate-800/60 px-4 py-2 rounded-2xl">
+                <span class="text-slate-400">Day ${h.day}</span>
+                <span>${h.text}</span>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+
+        <button onclick="nextDay()" class="w-full mx-4 mb-8 bg-gradient-to-r from-yellow-400 to-orange-500 text-slate-900 py-5 rounded-3xl text-xl font-bold">
+          ⏭️ 推进一天（市场刷新）
+        </button>
+      `;
+
+      app.innerHTML = html;
+    }
+
+    // ====================== 游戏逻辑 ======================
+    function doAction(id) {
+      const action = actions.find(a => a.id === id);
+      if (!action) return;
+      
+      if (action.cost && player.cash < action.cost) {
+        return alert("现金不足！");
+      }
+      
+      action.execute();
+      player.mental = Math.max(10, player.mental - 8); // 每次操作消耗心态
+      render();
+    }
+
+    function closeLeverage() {
+      // 强制平仓
+      const pnl = player.leverage.side === 'long' 
+        ? (market.btcPrice - player.leverage.entryPrice) / player.leverage.entryPrice * player.leverage.size * player.leverage.leverage
+        : (player.leverage.entryPrice - market.btcPrice) / player.leverage.entryPrice * player.leverage.size * player.leverage.leverage;
+      
+      player.cash += pnl + 100;
+      addHistory(`强制平仓，PNL $${pnl.toFixed(0)}`);
+      player.leverage = null;
+      render();
+    }
+
+    function nextDay() {
+      player.age++;
+      updateMarket();
+      checkMental();
+      
+      // 随机 meme 暴涨暴跌
+      if (Math.random() > 0.75) {
+        const luckyMeme = market.memes[Math.floor(Math.random() * market.memes.length)];
+        const multiplier = Math.random() > 0.5 ? 3 : 0.3;
+        luckyMeme.price *= multiplier;
+        alert(`🚨 ${luckyMeme.name} 今天暴${multiplier>1?'涨':'跌'} ${multiplier>1?'300%':'70%'}！`);
+      }
+      
+      // 破产检测
+      if (player.netWorth <= 10) {
+        alert("💀 你已经彻底破产… 散户之路到此结束！");
+        resetGame();
+        return;
+      }
+      
+      // 百万富翁彩蛋
+      if (player.netWorth >= 1000000) {
+        alert("🎉 恭喜你成为 Web3 百万富翁！\n\n你从 1000 刀梭哈成了传奇！");
+      }
+      
+      render();
+    }
+
+    function saveGame() {
+      localStorage.setItem('web3DegensSave', JSON.stringify(player));
+      alert("✅ 已存档，下次打开自动加载");
+    }
+
+    function loadGame() {
+      const saved = localStorage.getItem('web3DegensSave');
+      if (saved) {
+        player = JSON.parse(saved);
+        // 修复 meme 引用价格
+        player.portfolio.meme.forEach(m => {
+          if (!m.price) m.price = market.memes.find(x => x.name === m.name).price;
+        });
+      }
+    }
+
+    function resetGame() {
+      if (confirm("确定重置，从 1000 刀重新开始吗？")) {
+        localStorage.removeItem('web3DegensSave');
+        location.reload();
+      }
+    }
+
+    // ====================== 初始化 ======================
+    window.onload = () => {
+      loadGame();
+      render();
+    };
+
+    // 暴露全局函数给 onclick
+    window.doAction = doAction;
+    window.nextDay = nextDay;
+    window.closeLeverage = closeLeverage;
+    window.saveGame = saveGame;
+    window.resetGame = resetGame;
+  </script>
+</body>
+</html>
